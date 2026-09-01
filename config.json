@@ -1,0 +1,48 @@
+{
+  "llm": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash-lite",
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "api_key_env": "GEMINI_API_KEY"
+  },
+  "supported_providers": {
+    "gemini": {
+      "models": [
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-2.0-flash"
+      ],
+      "api_key_env": "GEMINI_API_KEY",
+      "description": "Google Gemini - Fast and powerful"
+    },
+    "openai": {
+      "models": [
+        "gpt-4-turbo",
+        "gpt-4",
+        "gpt-3.5-turbo"
+      ],
+      "api_key_env": "OPENAI_API_KEY",
+      "description": "OpenAI - Industry standard"
+    },
+    "anthropic": {
+      "models": [
+        "claude-3-opus-20240229",
+        "claude-3-sonnet-20240229",
+        "claude-3-haiku-20240307"
+      ],
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "description": "Anthropic Claude - Safety-focused"
+    },
+    "ollama": {
+      "models": [
+        "llama2",
+        "mistral",
+        "neural-chat",
+        "orca-mini"
+      ],
+      "base_url": "http://localhost:11434",
+      "description": "Ollama - Local models (requires Ollama running)"
+    }
+  }
+}

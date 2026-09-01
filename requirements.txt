@@ -1,0 +1,8 @@
+mcp[cli]
+google-genai
+python-dotenv
+
+# Optional LLM Providers (install as needed)
+# For OpenAI: pip install openai
+# For Anthropic: pip install anthropic
+# For Ollama: pip install ollama
