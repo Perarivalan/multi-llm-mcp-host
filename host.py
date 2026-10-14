@@ -101,7 +101,10 @@ class LLMMCPHost:
                 tools=llm_tools
             )
         except Exception as e:
-            print(f"\n❌ Error calling LLM: {str(e)}")
+            print(
+                f"\n❌ Request failed for {self.provider.upper()} model '{self.model}'."
+                f"\n   Details: {e}"
+            )
             return
 
 
@@ -187,27 +190,33 @@ class LLMMCPHost:
 
         if self.provider == "gemini":
             # Gemini-specific multi-turn conversation
-            final_response = self.llm.client.models.generate_content(
-                model=self.model,
-                contents=[
-                    user_question,
-                    response.candidates[0].content,
-                    types.Content(
-                        role="user",
-                        parts=tool_results,
-                    ),
-                ],
-                config={
-                    "temperature": self.temperature,
-                    "tools": [
-                        {
-                            "function_declarations": llm_tools
-                        }
-                    ]
-                },
-            )
-
-            final_text = final_response.text
+            try:
+                final_response = self.llm.client.models.generate_content(
+                    model=self.model,
+                    contents=[
+                        user_question,
+                        response.candidates[0].content,
+                        types.Content(
+                            role="user",
+                            parts=tool_results,
+                        ),
+                    ],
+                    config={
+                        "temperature": self.temperature,
+                        "tools": [
+                            {
+                                "function_declarations": llm_tools
+                            }
+                        ]
+                    },
+                )
+                final_text = final_response.text
+            except Exception as e:
+                print(
+                    f"\n❌ {self.provider.upper()} model '{self.model}' failed while processing tool results."
+                    f"\n   Details: {e}"
+                )
+                return
         else:
             # For other providers, create a follow-up prompt
             results_summary = "\n".join([
@@ -222,11 +231,18 @@ Based on these tool results:
 Provide analysis and answer the original question: {user_question}
 """
             
-            follow_up_response = self.llm.generate_content(
-                prompt=follow_up_prompt,
-                tools=None
-            )
-            final_text = self._extract_response_text(follow_up_response)
+            try:
+                follow_up_response = self.llm.generate_content(
+                    prompt=follow_up_prompt,
+                    tools=None
+                )
+                final_text = self._extract_response_text(follow_up_response)
+            except Exception as e:
+                print(
+                    f"\n❌ {self.provider.upper()} model '{self.model}' failed while processing tool results."
+                    f"\n   Details: {e}"
+                )
+                return
 
         print("\n✨ Analysis:")
         print(final_text)
@@ -322,7 +338,11 @@ async def main():
     
     # Show configuration menu if no args provided
     if not args.provider and not args.model:
-        provider, model, temperature, max_tokens, base_url = display_config_menu(config_manager)
+        try:
+            provider, model, temperature, max_tokens, base_url = display_config_menu(config_manager)
+        except (ValueError, EOFError) as e:
+            print(f"\n❌ LLM configuration error: {e}")
+            return
         config_manager.update_llm_config(provider, model, temperature=temperature, max_tokens=max_tokens)
         if provider == "ollama" and base_url:
             config_manager.config["llm"]["base_url"] = base_url
@@ -334,13 +354,24 @@ async def main():
     if provider == "ollama" and base_url:
         kwargs["base_url"] = base_url
     
-    host = LLMMCPHost(
-        provider=provider,
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        **kwargs
-    )
+    try:
+        config_manager.validate_llm_selection(provider, model)
+        host = LLMMCPHost(
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+    except (ValueError, ImportError) as e:
+        print(f"\n❌ LLM configuration error: {e}")
+        return
+    except Exception as e:
+        print(
+            f"\n❌ Could not initialize {provider.upper()} model '{model}'."
+            f"\n   Details: {e}"
+        )
+        return
 
     try:
 
@@ -358,21 +389,31 @@ async def main():
             if question.lower() == "config":
                 choice = show_advanced_menu()
                 if choice == "1":
-                    provider, model, temperature, max_tokens, base_url = display_config_menu(config_manager)
-                    config_manager.update_llm_config(provider, model, temperature=temperature, max_tokens=max_tokens)
-                    print("\n🔄 Reconfiguring host...")
-                    await host.stop()
+                    try:
+                        provider, model, temperature, max_tokens, base_url = display_config_menu(config_manager)
+                    except (ValueError, EOFError) as e:
+                        print(f"\n❌ LLM configuration error: {e}")
+                        continue
                     kwargs = {}
                     if provider == "ollama" and base_url:
                         kwargs["base_url"] = base_url
-                    host = LLMMCPHost(
-                        provider=provider,
-                        model=model,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        **kwargs
-                    )
-                    await host.start()
+                    try:
+                        config_manager.validate_llm_selection(provider, model)
+                        new_host = LLMMCPHost(
+                            provider=provider,
+                            model=model,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            **kwargs
+                        )
+                        await new_host.start()
+                    except Exception as e:
+                        print(f"\n❌ Reconfiguration failed: {e}")
+                        print("   The current LLM configuration has been kept.\n")
+                        continue
+                    await host.stop()
+                    host = new_host
+                    config_manager.update_llm_config(provider, model, temperature=temperature, max_tokens=max_tokens)
                     print("✓ Host reconfigured!\n")
                 elif choice == "2":
                     temp_choice = input("\nEnter temperature (0.0-1.0): ").strip()
@@ -403,9 +444,13 @@ async def main():
 
             await host.run(question)
 
+    except Exception as e:
+        print(f"\n❌ Host or MCP server error: {e}")
     finally:
-
-        await host.stop()
+        try:
+            await host.stop()
+        except Exception as e:
+            print(f"\n⚠️  MCP cleanup warning: {e}")
         print("\n✓ MCP Server disconnected.")
 
 

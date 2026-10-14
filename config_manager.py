@@ -74,7 +74,28 @@ class ConfigManager:
         if not api_key_env:
             return False
         
-        return os.environ.get(api_key_env) is not None
+        return bool(os.environ.get(api_key_env, "").strip())
+
+    def validate_llm_selection(self, provider: str, model: str) -> None:
+        """Raise a clear error when the selected provider or model is not configured."""
+        provider_config = self.get_provider_config(provider)
+        if not provider_config:
+            supported = ", ".join(self.get_supported_providers()) or "none"
+            raise ValueError(f"LLM provider '{provider}' is not configured. Available providers: {supported}.")
+
+        models = self.get_provider_models(provider)
+        if not models:
+            raise ValueError(f"No models are configured for provider '{provider}' in config.json.")
+        if model not in models:
+            raise ValueError(
+                f"Model '{model}' is not configured for {provider}. Available models: {', '.join(models)}."
+            )
+
+        api_key_env = provider_config.get("api_key_env")
+        if api_key_env and not self.validate_api_key(provider):
+            raise ValueError(
+                f"{provider.upper()} is not configured: set {api_key_env} in .env or the environment."
+            )
 
 
 def parse_cli_args() -> argparse.Namespace:
@@ -135,6 +156,10 @@ def display_config_menu(config_manager: ConfigManager) -> tuple:
     """
     supported_providers = config_manager.get_supported_providers()
     current_llm = config_manager.get_llm_config()
+    providers_list = list(supported_providers)
+
+    if not providers_list:
+        raise ValueError("No LLM providers are configured in config.json.")
     
     print("\n" + "="*70)
     print("🔧 LLM CONFIGURATION MENU")
@@ -142,48 +167,59 @@ def display_config_menu(config_manager: ConfigManager) -> tuple:
     
     # Step 1: Select Provider
     print("\n📦 Select LLM Provider:")
-    providers_list = list(supported_providers.keys())
     for i, provider in enumerate(providers_list, 1):
         config = supported_providers[provider]
         is_current = "✓ " if current_llm.get("provider") == provider else "  "
         print(f"{is_current}{i}. {provider.upper()} - {config['description']}")
     
-    provider_choice = input(f"\nEnter choice (1-{len(providers_list)}, or provider name): ").strip()
-    
-    # Handle numeric or string input
-    if provider_choice.isdigit():
-        provider_idx = int(provider_choice) - 1
-        if 0 <= provider_idx < len(providers_list):
-            provider = providers_list[provider_idx]
+    default_provider = current_llm.get("provider")
+    if default_provider not in supported_providers:
+        default_provider = providers_list[0]
+
+    while True:
+        provider_choice = input(
+            f"\nEnter choice (1-{len(providers_list)}, or provider name; "
+            f"default {default_provider}): "
+        ).strip().lower()
+        if not provider_choice:
+            provider = default_provider
+        elif provider_choice.isdigit() and 1 <= int(provider_choice) <= len(providers_list):
+            provider = providers_list[int(provider_choice) - 1]
+        elif provider_choice in supported_providers:
+            provider = provider_choice
         else:
-            provider = current_llm.get("provider", "gemini")
-    else:
-        provider = provider_choice.lower() if provider_choice else current_llm.get("provider", "gemini")
-    
-    # Validate provider
-    if provider not in supported_providers:
-        print(f"\n⚠️  Provider '{provider}' not found. Using default: gemini")
-        provider = "gemini"
+            print(f"⚠️  Unknown provider '{provider_choice}'. Choose from: {', '.join(providers_list)}.")
+            continue
+        break
     
     # Step 2: Select Model
     print(f"\n📋 Available models for {provider.upper()}:")
     available_models = config_manager.get_provider_models(provider)
+    if not available_models:
+        raise ValueError(f"No models are configured for provider '{provider}'. Check config.json.")
+
     current_model = current_llm.get("model") if current_llm.get("provider") == provider else None
     
     for i, model in enumerate(available_models, 1):
         is_current = "✓ " if model == current_model else "  "
         print(f"{is_current}{i}. {model}")
     
-    model_choice = input(f"\nEnter choice (1-{len(available_models)}, or model name): ").strip()
-    
-    if model_choice.isdigit():
-        model_idx = int(model_choice) - 1
-        if 0 <= model_idx < len(available_models):
-            model = available_models[model_idx]
+    default_model = current_model if current_model in available_models else available_models[0]
+    while True:
+        model_choice = input(
+            f"\nEnter choice (1-{len(available_models)}, or model name; "
+            f"default {default_model}): "
+        ).strip()
+        if not model_choice:
+            model = default_model
+        elif model_choice.isdigit() and 1 <= int(model_choice) <= len(available_models):
+            model = available_models[int(model_choice) - 1]
+        elif model_choice in available_models:
+            model = model_choice
         else:
-            model = available_models[0]
-    else:
-        model = model_choice if model_choice else available_models[0]
+            print(f"⚠️  Unknown model '{model_choice}'. Choose from: {', '.join(available_models)}.")
+            continue
+        break
     
     # Step 3: Select Temperature
     print("\n🌡️  Select Temperature (creativity level):")

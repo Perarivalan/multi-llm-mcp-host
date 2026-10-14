@@ -8,6 +8,15 @@ from typing import Any, Optional
 from abc import ABC, abstractmethod
 
 
+def _require_api_key(environment_variable: str, provider: str) -> str:
+    api_key = os.environ.get(environment_variable, "").strip()
+    if not api_key:
+        raise ValueError(
+            f"{provider} is not configured: set {environment_variable} in .env or the environment."
+        )
+    return api_key
+
+
 class BaseLLMClient(ABC):
     """Abstract base class for LLM clients."""
     
@@ -33,9 +42,7 @@ class GeminiClient(BaseLLMClient):
         
         try:
             from google import genai
-            api_key = os.environ.get("GEMINI_API_KEY")
-            if not api_key:
-                raise ValueError("GEMINI_API_KEY environment variable not set")
+            api_key = _require_api_key("GEMINI_API_KEY", "Gemini")
             self.client = genai.Client(api_key=api_key)
         except ImportError:
             raise ImportError("google-genai package not installed. Run: pip install google-genai")
@@ -67,9 +74,7 @@ class OpenAIClient(BaseLLMClient):
         
         try:
             from openai import OpenAI
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY environment variable not set")
+            api_key = _require_api_key("OPENAI_API_KEY", "OpenAI")
             self.client = OpenAI(api_key=api_key)
         except ImportError:
             raise ImportError("openai package not installed. Run: pip install openai")
@@ -112,9 +117,7 @@ class AnthropicClient(BaseLLMClient):
         
         try:
             from anthropic import Anthropic
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if not api_key:
-                raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+            api_key = _require_api_key("ANTHROPIC_API_KEY", "Anthropic")
             self.client = Anthropic(api_key=api_key)
         except ImportError:
             raise ImportError("anthropic package not installed. Run: pip install anthropic")
@@ -203,10 +206,14 @@ class LLMFactory:
         Returns:
             LLM client instance
         """
-        provider_lower = provider.lower()
+        provider_lower = provider.strip().lower()
         
         if provider_lower not in cls._clients:
-            raise ValueError(f"Unknown provider: {provider}. Supported: {list(cls._clients.keys())}")
+            supported = ", ".join(cls._clients)
+            raise ValueError(f"Unknown LLM provider '{provider}'. Supported providers: {supported}.")
+
+        if not model or not model.strip():
+            raise ValueError(f"No model selected for provider '{provider_lower}'.")
         
         client_class = cls._clients[provider_lower]
         return client_class(
